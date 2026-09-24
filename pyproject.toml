@@ -18,6 +18,7 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "ruff>=0.16.8",
     "sse-starlette>=3.4.11",
+    "tiktoken>=0.14.0",
     "uvicorn>=0.53.0",
 ]
 

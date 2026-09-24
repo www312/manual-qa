@@ -15,6 +15,19 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from manual_qa.config import LLMConfig
 
+try:
+    import tiktoken
+
+    _ENC = tiktoken.get_encoding("cl100k_base")
+
+    def _n_tokens(s: str) -> int:
+        return len(_ENC.encode(s))
+
+except ImportError:  # pragma: no cover
+
+    def _n_tokens(s: str) -> int:  # type: ignore[misc]
+        return len(s) // 3  # 英文近似
+
 
 class LLMClient:
     """Chat 客户端：sync 一次问答 + stream 流式（SSE 用）。"""
@@ -51,11 +64,13 @@ class EmbeddingClient:
         self.cfg = cfg
         self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], max_tokens: int = 6000) -> list[list[float]]:
+        """安全切分：单条超限时按 max_tokens 截断（生产应分片重建，此处语料已保证 <6000）。"""
+        safe = [t if _n_tokens(t) <= max_tokens else t[: len(t) * max_tokens // _n_tokens(t)] for t in texts]
         out: list[list[float]] = []
-        batch = 64
-        for i in range(0, len(texts), batch):
-            part = texts[i : i + batch]
+        batch = 32
+        for i in range(0, len(safe), batch):
+            part = safe[i : i + batch]
             for attempt in range(3):
                 try:
                     resp = self.client.embeddings.create(
