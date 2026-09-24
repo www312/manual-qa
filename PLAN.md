@@ -54,12 +54,13 @@ BM25(jieba) ─┘
 - A/B 对比实验：基线 vs +BM25 vs +改写 vs +重排，逐项叠加
 - **验收**：recall@5 提升 ≥5pt 才算升级成立；产出对比表（进 README 与简历）
 
-### P3 服务与 Agent 化（约 2 次会话）
+### P3 服务、Agent 化与上线（约 3 次会话）
 - FastAPI：POST /api/ask（SSE 流式+引用）、POST /api/search、GET /health
 - MCP Server：manual_search 工具暴露，Claude 等外部 Agent 可挂载
-- Web UI 单页：问答框 + 流式渲染 + 引用块高亮
-- Docker compose（app + qdrant）、GitHub Actions（ruff + pytest）、开源 README
-- **验收**：`docker compose up` 一键起；CI 绿；MCP 工具真实调通截图留档
+- Web 前端 demo：Vue3 + Element Plus，问答框 + SSE 流式渲染 + 引用块高亮/点击溯源
+- **公网部署上线**：方案 A（主）国内轻量云服务器 ~100 元/年，Docker compose（app+qdrant+nginx）一键拉起；方案 D（兜底）README 内嵌演示 GIF；**key 防刷必做**（每 IP 每日限流 + 配额熔断）；简历呈现 = repo 链接 + Live Demo 一行
+- GitHub Actions（ruff + pytest）、开源 README（架构图 + 评测对比表 + 徽章）
+- **验收**：compose up 一键起；CI 绿；MCP 调通留档；线上 demo 连续 7 天可用；限流压测通过
 
 ## 四、语料与成本
 
@@ -68,6 +69,7 @@ BM25(jieba) ─┘
 | 主语料 | STM32H743 RM0433（3353 页） | 官方直链，寄存器/外设/时钟问题密集 |
 | 中文语料 | ESP-IDF 编程指南 PDF | 乐鑫官方中文，QA 集可做中英跨语言检索 |
 | API 成本 | 预计 <15 元 | embedding 5000 块 ≈1.3 元；评测生成 100 题×4 配置 ≈10 元 |
+| 云服务器（P3） | 约 100 元/年 | 轻量应用服务器 2G 内存档；Qdrant 常驻几百 MB，够用 |
 
 ## 五、风险与边界
 
