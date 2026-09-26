@@ -17,11 +17,14 @@ sys.path.insert(0, "src")
 from manual_qa.retrieval import Retriever
 
 
-def eval_mode(r: Retriever, qa: list[dict], mode: str, k: int = 10, by_id: dict | None = None) -> dict:
+def eval_mode(r: Retriever, qa: list[dict], mode: str, k: int = 10, by_id: dict | None = None, rewriter=None) -> dict:
     recalls5, recalls10, rrs, misses = [], [], [], []
     c5, c10 = [], []  # 章节级
     for item in qa:
-        hits = r.search(item["question"], k=k, mode=mode)
+        q = item["question"]
+        if rewriter is not None and mode in ("bm25", "hybrid"):
+            q = rewriter.rewrite(q)  # BM25 侧用改写后的英文查询
+        hits = r.search(q, k=k, mode=mode)
         ids = [h["chunk_id"] for h in hits]
         gold = item["seed_chunk_id"]
         gold_ch = by_id[gold]["chapter"] if by_id else None

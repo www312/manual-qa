@@ -19,9 +19,44 @@ from manual_qa.config import load_settings
 from manual_qa.llm import EmbeddingClient
 
 
-def _tokenize(text: str) -> list[str]:
-    """jieba 分词 + 小写化；英文符号（寄存器名等）保持整词。"""
-    return [t.lower() for t in jieba.cut_for_search(text) if t.strip()]
+# 中文停用词：出题语言（中文）的高频虚词在英文语料中反而成了“稀有词”，
+# IDF 加权后严重干扰 BM25 打分（诊断：'的/是/多少' 把 HSEM 题顶到了蓝牙章节）。
+_CN_STOP = set(
+    "的 是 多少 什么 怎么 如何 哪些 对于 关于 以及 或者 但是 如果 请问 "
+    "地址 偏移 寄存器 位 值 类型 中 在 上 下 里 和 与 也 都 就 会 可 可以 "
+    "返回 软件 读取 进行 使用 设置 配置 进入 输出 输入".split()
+)
+
+
+def _tokenize(text: str, drop_stop: bool = False) -> list[str]:
+    """混合分词：连续 ASCII 串（寄存器名/API名/路径）保持整词，中文走 jieba。
+
+    drop_stop=True 时剔除中文停用词（BM25 索引与查询两侧都开）。
+    教训：纯 jieba.cut_for_search 会把 RCC_APB1ENR 切成碎片；虚词不剔会
+    让中文查询在英文语料上被 IDF 带偏。
+    """
+    out: list[str] = []
+    buf = ""          # ASCII 连续串缓冲
+    cbuf = ""         # 非ASCII 连续串缓冲（中文短语）
+    for ch in text:
+        if ch.isascii() and (ch.isalnum() or ch in "_-.@/"):
+            if cbuf:
+                out.extend(t for t in jieba.cut(cbuf) if t.strip())
+                cbuf = ""
+            buf += ch
+        else:
+            if buf:
+                out.append(buf.lower())
+                buf = ""
+            if not ch.isspace():
+                cbuf += ch
+    if buf:
+        out.append(buf.lower())
+    if cbuf:
+        out.extend(t for t in jieba.cut(cbuf) if t.strip())
+    if drop_stop:
+        out = [t for t in out if t not in _CN_STOP]
+    return out
 
 
 class Retriever:
@@ -38,8 +73,8 @@ class Retriever:
         self.qd = get_client(s.store.qdrant_path)
         self.collection = s.store.collection
 
-        # BM25 索引（启动时建一次）
-        self.bm25 = BM25Okapi([_tokenize(c["text"]) for c in chunks])
+        # BM25 索引（启动时建一次；两侧同用停用词过滤）
+        self.bm25 = BM25Okapi([_tokenize(c["text"], drop_stop=True) for c in chunks])
         self._bm25_ids = [c["chunk_id"] for c in chunks]
 
     def _vector(self, query: str, k: int) -> list[tuple[str, float]]:
@@ -54,7 +89,7 @@ class Retriever:
         return [(p.payload["chunk_id"], p.score) for p in pts if p.payload]
 
     def _bm25_search(self, query: str, k: int) -> list[tuple[str, float]]:
-        scores = self.bm25.get_scores(_tokenize(query))
+        scores = self.bm25.get_scores(_tokenize(query, drop_stop=True))
         top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [(self._bm25_ids[i], scores[i]) for i in top if scores[i] > 0]
 
