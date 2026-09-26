@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview",
-    "mock": "node mock/server.mjs"
+    "mock": "node mock/server.mjs",
+    "build:strict": "vue-tsc -b && vite build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
