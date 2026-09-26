@@ -22,11 +22,14 @@ def get_client(path: Path) -> QdrantClient:
     return QdrantClient(path=str(path))
 
 
-def build_index(chunks: list[Chunk], dim: int = 2048) -> dict:
+def build_index(chunks: list[Chunk] | list[dict], dim: int = 2048) -> dict:
     s = load_settings()
     emb = EmbeddingClient(s.embed)
     client = get_client(s.store.qdrant_path)
     col = s.store.collection
+
+    def _g(c, k):
+        return c[k] if isinstance(c, dict) else getattr(c, k)
 
     if client.collection_exists(col):
         client.delete_collection(col)
@@ -35,7 +38,7 @@ def build_index(chunks: list[Chunk], dim: int = 2048) -> dict:
         vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
     )
 
-    texts = [c.text for c in chunks]
+    texts = [_g(c, "text") for c in chunks]
     vectors = emb.embed(texts)  # 内部分批+重试
 
     points = [
@@ -43,11 +46,11 @@ def build_index(chunks: list[Chunk], dim: int = 2048) -> dict:
             id=i,
             vector=v,
             payload={
-                "chunk_id": c.chunk_id,
-                "doc": c.doc,
-                "chapter": c.chapter,
-                "page": c.page,
-                "text": c.text,
+                "chunk_id": _g(c, "chunk_id"),
+                "doc": _g(c, "doc"),
+                "chapter": _g(c, "chapter"),
+                "page": _g(c, "page"),
+                "text": _g(c, "text"),
             },
         )
         for i, (c, v) in enumerate(zip(chunks, vectors, strict=True))
@@ -66,34 +69,30 @@ if __name__ == "__main__":
 
     from manual_qa.ingest import ingest_pdf
 
+    # 精选集优先（预算控制）；全量重跑用 data/chunks.jsonl
+    import os
+
+    subset = os.environ.get("CHUNKS_FILE", "data/chunks_selected.jsonl")
+    if subset != "rebuild":
+        all_chunks = [json.loads(l) for l in open(subset)]
+        print(f"loading {subset}: {len(all_chunks)} chunks")
+    else:
+        all_chunks = []
+        for path, doc in [
+            ("data/raw/rm0433.pdf", "rm0433"),
+            ("data/raw/esp-idf-zh_CN-v5.0.9-esp32.pdf", "espidf"),
+        ]:
+            cs = ingest_pdf(path, doc)
+            print(f"{doc}: {len(cs)} chunks ({time.time():.0f})")
+            all_chunks.extend(cs)
+        out = Path("data/chunks.jsonl")
+        with out.open("w", encoding="utf-8") as f:
+            for c in all_chunks:
+                f.write(json.dumps({
+                    "chunk_id": c.chunk_id, "doc": c.doc,
+                    "chapter": c.chapter, "page": c.page, "text": c.text,
+                }, ensure_ascii=False) + "\n")
+
     t0 = time.time()
-    all_chunks: list[Chunk] = []
-    for path, doc in [
-        ("data/raw/rm0433.pdf", "rm0433"),
-        ("data/raw/esp-idf-zh_CN-v5.0.9-esp32.pdf", "espidf"),
-    ]:
-        cs = ingest_pdf(path, doc)
-        print(f"{doc}: {len(cs)} chunks ({time.time()-t0:.0f}s)")
-        all_chunks.extend(cs)
-
-    # 落盘一份 chunk 快照（评测与调试用，不进 git）
-    out = Path("data/chunks.jsonl")
-    with out.open("w", encoding="utf-8") as f:
-        for c in all_chunks:
-            f.write(
-                json.dumps(
-                    {
-                        "chunk_id": c.chunk_id,
-                        "doc": c.doc,
-                        "chapter": c.chapter,
-                        "page": c.page,
-                        "text": c.text,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    print(f"chunks.jsonl written: {out}")
-
     stats = build_index(all_chunks)
     print(f"qdrant: {stats} ({time.time()-t0:.0f}s total)")
