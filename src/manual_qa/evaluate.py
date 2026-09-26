@@ -17,27 +17,33 @@ sys.path.insert(0, "src")
 from manual_qa.retrieval import Retriever
 
 
-def eval_mode(r: Retriever, qa: list[dict], mode: str, k: int = 10) -> dict:
+def eval_mode(r: Retriever, qa: list[dict], mode: str, k: int = 10, by_id: dict | None = None) -> dict:
     recalls5, recalls10, rrs, misses = [], [], [], []
+    c5, c10 = [], []  # 章节级
     for item in qa:
         hits = r.search(item["question"], k=k, mode=mode)
         ids = [h["chunk_id"] for h in hits]
         gold = item["seed_chunk_id"]
-        if gold in ids[:5]:
-            recalls5.append(1)
-        else:
-            recalls5.append(0)
+        gold_ch = by_id[gold]["chapter"] if by_id else None
+        hit_ids = [i for i in ids if i == gold or (by_id and by_id[i]["chapter"] == gold_ch)]
+
+        recalls5.append(1 if gold in ids[:5] else 0)
+        recalls10.append(1 if gold in ids else 0)
+        c5.append(1 if hit_ids[:5] else 0)
+        c10.append(1 if hit_ids else 0)
         if gold in ids:
-            recalls10.append(1)
             rrs.append(1.0 / (ids.index(gold) + 1))
+        elif hit_ids:
+            rrs.append(1.0 / (ids.index(hit_ids[0]) + 1))
         else:
-            recalls10.append(0)
             misses.append(item["question"][:50])
     return {
         "mode": mode,
         "n": len(qa),
         "recall@5": statistics.mean(recalls5),
         "recall@10": statistics.mean(recalls10),
+        "chapter_recall@5": statistics.mean(c5),
+        "chapter_recall@10": statistics.mean(c10),
         "MRR": statistics.mean(rrs),
         "misses": misses,
     }
@@ -47,16 +53,17 @@ def main() -> None:
     qa = [json.loads(l) for l in open("data/qa_dataset_raw.jsonl")]
     print(f"QA set: {len(qa)} questions")
     chunks = [json.loads(l) for l in open("data/chunks_selected.jsonl")]
+    by_id = {c["chunk_id"]: c for c in chunks}
     r = Retriever(chunks)
 
     results = []
     for mode in ["vector", "bm25", "hybrid"]:
-        res = eval_mode(r, qa, mode)
+        res = eval_mode(r, qa, mode, by_id=by_id)
         results.append(res)
         print(
-            f"{mode:7s}  recall@5={res['recall@5']:.3f}  "
-            f"recall@10={res['recall@10']:.3f}  MRR={res['MRR']:.3f}  "
-            f"miss={len(res['misses'])}"
+            f"{mode:7s}  块级 r@5={res['recall@5']:.3f} r@10={res['recall@10']:.3f}  "
+            f"章节级 r@5={res['chapter_recall@5']:.3f} r@10={res['chapter_recall@10']:.3f}  "
+            f"MRR={res['MRR']:.3f}  miss={len(res['misses'])}"
         )
 
     with open("data/eval_baseline.json", "w", encoding="utf-8") as f:
