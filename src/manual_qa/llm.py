@@ -36,25 +36,54 @@ class LLMClient:
         self.cfg = cfg
         self.client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
-    def chat(self, messages: list[ChatCompletionMessageParam], temperature: float = 0.1) -> str:
-        resp = self.client.chat.completions.create(
-            model=self.cfg.model,
-            messages=messages,
-            temperature=temperature,
-        )
-        return resp.choices[0].message.content or ""
+    def chat(self, messages: list[ChatCompletionMessageParam], temperature: float = 0.1, retries: int = 2) -> str:
+        """带重试：网络抖动（APIConnectionError/超时）时指数退避重试。"""
+        import time
+
+        last_err: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                resp = self.client.chat.completions.create(
+                    model=self.cfg.model,
+                    messages=messages,
+                    temperature=temperature,
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as ex:
+                # 仅对连接类错误重试；4xx 参数/鉴权错误快速失败
+                msg = str(ex)
+                if "Connection" in type(ex).__name__ or "Timeout" in type(ex).__name__ or "timeout" in msg.lower():
+                    last_err = ex
+                    if attempt < retries:
+                        time.sleep(1.5 * (attempt + 1))
+                        continue
+                raise
+        raise last_err  # type: ignore[misc]
 
     def stream(self, messages: list[ChatCompletionMessageParam], temperature: float = 0.1) -> Iterator[str]:
-        stream = self.client.chat.completions.create(
-            model=self.cfg.model,
-            messages=messages,
-            temperature=temperature,
-            stream=True,
-        )
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                yield delta
+        """流式：连接建立失败自动重试 2 次；流中断则抛出（前端显示重试提示）。"""
+        import time
+
+        for attempt in range(3):
+            try:
+                stream = self.client.chat.completions.create(
+                    model=self.cfg.model,
+                    messages=messages,
+                    temperature=temperature,
+                    stream=True,
+                )
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        yield delta
+                return
+            except Exception as ex:
+                # 仅对连接类错误重试；4xx 参数/鉴权错误快速失败
+                if ("Connection" in type(ex).__name__ or "Timeout" in type(ex).__name__
+                        or "timeout" in str(ex).lower()) and attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
 
 
 class EmbeddingClient:

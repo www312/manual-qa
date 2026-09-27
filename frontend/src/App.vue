@@ -60,8 +60,22 @@ async function ask(value = question.value) {
       else if (event === 'error') throw new Error(typeof payload.message === 'string' ? payload.message : '服务返回错误')
     })
   } catch (error) {
-    if ((error as Error).name !== 'AbortError') { answerMessage.loading = false; answerMessage.error = true; answerMessage.text = `暂时无法获取答案：${error instanceof Error ? error.message : '未知错误'}` }
+    if ((error as Error).name !== 'AbortError') {
+      answerMessage.loading = false; answerMessage.error = true
+      const raw = error instanceof Error ? error.message : '未知错误'
+      const isNetwork = /network|failed to fetch|connection|timeout|Connection/i.test(raw)
+      answerMessage.text = isNetwork ? '网络波动，与模型的连接中断了。' : `暂时无法获取答案：${raw}`
+    }
   } finally { answerMessage.loading = false; isStreaming.value = false; controller = null; scrollToBottom() }
+}
+function retryMessage(messageId: number) {
+  const idx = messages.value.findIndex(m => m.id === messageId)
+  if (idx < 1) return
+  const userMsg = messages.value[idx - 1]
+  if (userMsg.role !== 'user') return
+  // 移除失败的回答，重新提问
+  messages.value.splice(idx, 1)
+  ask(userMsg.text)
 }
 
 async function readSse(stream: ReadableStream<Uint8Array>, onEvent: (event: string, payload: StreamPayload) => void) {
@@ -99,7 +113,7 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
             <div class="answer-meta"><span class="answer-avatar">✦</span><span>手册助手</span><span class="answer-label">AI 回答</span></div>
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
             <div v-if="message.steps?.length" class="agent-steps"><div v-for="(step, idx) in message.steps" :key="idx" class="agent-step">{{ agentStepLine(step) }}</div></div>
-            <div v-if="message.error" class="answer error-answer">{{ message.text }}</div>
+            <div v-if="message.error" class="answer error-answer">{{ message.text }} <button v-if="message.error && !isStreaming" class="retry-link" @click="retryMessage(message.id)">点击重试</button></div>
             <div v-else-if="message.text" class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text)"></div>
             <div v-if="message.text && !message.error" class="answer-footer"><span v-if="message.latency">检索与生成耗时 {{ (message.latency / 1000).toFixed(1) }}s</span><button v-if="lastQuestion && !isStreaming" @click="rerun">↻ 用当前模式重问</button></div>
             <div v-if="message.citations?.length" class="citations-panel">

@@ -451,3 +451,16 @@ body {
   .topbar p { display: none; }
   .message.user .user-text { max-width: 92%; }
 }
+
+.retry-link {
+  font: inherit;
+  font-size: 13px;
+  color: var(--link);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  margin-left: 6px;
+}
+.retry-link:hover { opacity: 0.8; }
