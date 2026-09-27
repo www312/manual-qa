@@ -66,8 +66,8 @@ async function readSse(stream: ReadableStream<Uint8Array>, onEvent: (event: stri
   const reader = stream.getReader(); const decoder = new TextDecoder(); let buffer = ''
   while (true) {
     const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done })
-    const frames = buffer.split('\n\n'); buffer = frames.pop() ?? ''
-    frames.filter(Boolean).forEach((frame) => { const event = frame.match(/^event:\s*(.+)$/m)?.[1]?.trim() ?? 'message'; const data = frame.match(/^data:\s*(.+)$/m)?.[1]?.trim(); if (data) onEvent(event, JSON.parse(data) as StreamPayload) })
+    const frames = buffer.split(/\r?\n\r?\n/); buffer = frames.pop() ?? ''
+    frames.filter(Boolean).forEach((frame) => { const clean = frame.replace(/\r/g, ''); const event = clean.match(/^event:\s*(.+)$/m)?.[1]?.trim() ?? 'message'; const data = clean.match(/^data:\s*(.+)$/m)?.[1]?.trim(); if (data) onEvent(event, JSON.parse(data) as StreamPayload) })
     if (done) break
   }
 }

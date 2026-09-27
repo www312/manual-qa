@@ -44,6 +44,14 @@ class RAG:
             },
         ]
 
+    async def astream(self, question: str, hits: list[dict]):
+        """异步流式生成（FastAPI SSE 用）。"""
+        import asyncio
+
+        for delta in self.llm.stream(self._messages(question, hits)):
+            await asyncio.sleep(0)  # 让出事件循环，SSE 心跳可穿插
+            yield delta
+
     def ask(self, question: str, k: int = 5, mode: str = "hybrid") -> dict:
         hits = self.r.search(question, k=k, mode=mode)
         answer = self.llm.chat(self._messages(question, hits))

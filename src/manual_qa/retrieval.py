@@ -93,6 +93,23 @@ class Retriever:
         top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
         return [(self._bm25_ids[i], scores[i]) for i in top if scores[i] > 0]
 
+    def search_dual(
+        self, query_vec: str, query_lex: str, k: int | None = None
+    ) -> list[dict]:
+        """P2 实验配置 C 的线上形态：向量侧用原查询（语义），BM25 侧用改写查询（词法）。"""
+        k = k or self.settings.retrieval.top_k
+        rrf_k = self.settings.retrieval.rrf_k
+        vr = self._vector(query_vec, k * 2)
+        br = self._bm25_search(query_lex, k * 2)
+        agg: dict[str, float] = {}
+        for rank, (cid, _) in enumerate(vr):
+            agg[cid] = agg.get(cid, 0.0) + 1.0 / (rrf_k + rank + 1)
+        for rank, (cid, _) in enumerate(br):
+            agg[cid] = agg.get(cid, 0.0) + 1.0 / (rrf_k + rank + 1)
+        ranked = sorted(agg.items(), key=lambda x: -x[1])[:k]
+        by_id = {c["chunk_id"]: c for c in self.chunks}
+        return [{**by_id[cid], "score": sc} for cid, sc in ranked if cid in by_id]
+
     def search(
         self, query: str, k: int | None = None, mode: str = "vector"
     ) -> list[dict]:
