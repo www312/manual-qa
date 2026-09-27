@@ -81,7 +81,7 @@ function citationDocLabel(doc: string) { return doc.toLowerCase().includes('esp'
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
-      <div><h1>嵌入式手册智能问答</h1><p>STM32H743 RM0433 + ESP-IDF <span class="dot">·</span> 21.7 万块技术语料</p></div>
+      <div><h1>嵌入式手册智能问答</h1><p>STM32H743 RM0433 + ESP-IDF <span class="dot">·</span> 10.5 万块技术语料</p></div>
       <div class="topbar-status"><i></i>知识库已连接</div>
     </header>
     <main ref="conversation" class="conversation" aria-live="polite">
