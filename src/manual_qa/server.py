@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from manual_qa.agent import AgentRAG
 from manual_qa.generation import RAG
 from manual_qa.retrieval import Retriever
 from manual_qa.rewrite import QueryRewriter
@@ -30,6 +31,7 @@ app.add_middleware(
 _retriever: Retriever | None = None
 _rag: RAG | None = None
 _rewriter: QueryRewriter | None = None
+_agent: AgentRAG | None = None
 
 
 def get_rag() -> RAG:
@@ -41,13 +43,14 @@ def get_rag() -> RAG:
         _retriever = Retriever(chunks)
         _rag = RAG(_retriever)
         _rewriter = QueryRewriter()
+        globals()["_agent"] = AgentRAG(_retriever)
         assert _retriever is not None and _rewriter is not None
     return _rag
 
 
 class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=500)
-    mode: str = Field(default="hybrid", pattern="^(vector|bm25|hybrid)$")
+    mode: str = Field(default="hybrid", pattern="^(vector|bm25|hybrid|agent)$")
     k: int = Field(default=5, ge=1, le=10)
 
 
@@ -66,11 +69,32 @@ def health() -> dict:
 @app.post("/api/ask")
 async def ask(body: AskBody):
     rag = get_rag()
+    assert _agent is not None
     qid = f"q_{uuid.uuid4().hex[:12]}"
     t0 = time.time()
 
     async def gen():
         try:
+            if body.mode == "agent":
+                # Agent 模式：LLM 自主决定是否/如何调用 manual_search
+                async for ev in _agent.run(body.question):
+                    if ev["type"] == "step":
+                        yield {"event": "step", "data": json.dumps(
+                            {"kind": ev["kind"], **({"query": ev["query"]} if "query" in ev else {}), **({"text": ev["text"]} if ev.get("text") else {})},
+                            ensure_ascii=False,
+                        )}
+                    elif ev["type"] == "done":
+                        cites = [
+                            {"n": i + 1, "chunk_id": h["chunk_id"], "doc": h["doc"],
+                             "chapter": h["chapter"], "page": h["page"],
+                             "score": round(float(h["score"]), 3), "snippet": h["text"][:120]}
+                            for i, h in enumerate(ev["citations"])
+                        ]
+                        yield {"event": "citations", "data": json.dumps({"citations": cites}, ensure_ascii=False)}
+                        yield {"event": "done", "data": json.dumps(
+                            {"question_id": qid, "latency_ms": int((time.time() - t0) * 1000), "tokens": 0})}
+                return
+
             # 检索（P2 配置C：向量用原查询，BM25 用改写查询）
             hits = (
                 _retriever.search_dual(

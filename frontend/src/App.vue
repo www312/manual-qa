@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 
-type SearchMode = 'vector' | 'bm25' | 'hybrid'
+type SearchMode = 'vector' | 'bm25' | 'hybrid' | 'agent'
 type Citation = { n: number; chunk_id: string; doc: string; chapter: string; page: number; score: number; snippet: string }
-type Message = { id: number; role: 'user' | 'assistant'; text: string; citations?: Citation[]; loading?: boolean; error?: boolean; latency?: number }
+type AgentStep = { kind: string; query?: string; text?: string }
+type Message = { id: number; role: 'user' | 'assistant'; text: string; citations?: Citation[]; loading?: boolean; error?: boolean; latency?: number; steps?: AgentStep[] }
 type StreamPayload = Record<string, unknown>
 
 const examples = [
@@ -43,7 +44,7 @@ async function ask(value = question.value) {
   if (!text || isStreaming.value) return
   question.value = ''
   resizeComposer()
-  const answerMessage: Message = { id: nextMessageId++, role: 'assistant', text: '', citations: [], loading: true }
+  const answerMessage: Message = { id: nextMessageId++, role: 'assistant', text: '', citations: [], loading: true, steps: mode.value === 'agent' ? [] : undefined }
   messages.value.push({ id: nextMessageId++, role: 'user', text }, answerMessage)
   isStreaming.value = true
   controller = new AbortController()
@@ -53,6 +54,7 @@ async function ask(value = question.value) {
     if (!response.ok || !response.body) throw new Error(`请求失败（${response.status}）`)
     await readSse(response.body, (event, payload) => {
       if (event === 'citations') { answerMessage.citations = Array.isArray(payload.citations) ? payload.citations as Citation[] : []; answerMessage.loading = false }
+      else if (event === 'step' && answerMessage.steps) { answerMessage.steps.push(payload as AgentStep); answerMessage.loading = false; if (payload.kind === 'answer' && typeof payload.text === 'string') answerMessage.text += payload.text; scrollToBottom() }
       else if (event === 'delta' && typeof payload.text === 'string') { answerMessage.loading = false; answerMessage.text += payload.text; scrollToBottom() }
       else if (event === 'done' && typeof payload.latency_ms === 'number') answerMessage.latency = payload.latency_ms
       else if (event === 'error') throw new Error(typeof payload.message === 'string' ? payload.message : '服务返回错误')
@@ -75,6 +77,7 @@ function stop() { controller?.abort() }
 function onKeydown(event: KeyboardEvent) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); ask() } }
 function rerun() { if (lastQuestion.value) ask(lastQuestion.value) }
 function citationDocLabel(doc: string) { return doc.toLowerCase().includes('esp') ? 'ESP-IDF' : 'RM0433' }
+function agentStepLine(payload: StreamPayload & { kind?: string; query?: string; text?: string }) { return payload.kind === 'search' ? `🔍 manual_search("${payload.query ?? ''}")` : `💬 ${payload.text?.slice(0, 60) ?? ''}` }
 </script>
 
 <template>
@@ -95,6 +98,7 @@ function citationDocLabel(doc: string) { return doc.toLowerCase().includes('esp'
           <div v-else class="answer-wrap">
             <div class="answer-meta"><span class="answer-avatar">✦</span><span>手册助手</span><span class="answer-label">AI 回答</span></div>
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
+            <div v-if="message.steps?.length" class="agent-steps"><div v-for="(step, idx) in message.steps" :key="idx" class="agent-step">{{ agentStepLine(step) }}</div></div>
             <div v-else-if="message.error" class="answer error-answer">{{ message.text }}</div>
             <div v-else class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text)"></div>
             <div v-if="message.text && !message.error" class="answer-footer"><span v-if="message.latency">检索与生成耗时 {{ (message.latency / 1000).toFixed(1) }}s</span><button v-if="lastQuestion && !isStreaming" @click="rerun">↻ 用当前模式重问</button></div>
@@ -107,7 +111,7 @@ function citationDocLabel(doc: string) { return doc.toLowerCase().includes('esp'
       </section>
     </main>
     <footer class="composer-area">
-      <div class="mode-row"><span class="mode-label">检索模式</span><div class="segmented" role="radiogroup" aria-label="检索模式"><button v-for="item in (['vector', 'bm25', 'hybrid'] as SearchMode[])" :key="item" :class="{ selected: mode === item }" :aria-checked="mode === item" role="radio" :disabled="isStreaming" @click="mode = item">{{ item }}</button></div><span class="mode-hint">{{ mode === 'hybrid' ? '语义 + 关键词，推荐' : mode === 'vector' ? '语义相似度' : '关键词匹配' }}</span></div>
+      <div class="mode-row"><span class="mode-label">检索模式</span><div class="segmented" role="radiogroup" aria-label="检索模式"><button v-for="item in (['vector', 'bm25', 'hybrid', 'agent'] as SearchMode[])" :key="item" :class="{ selected: mode === item }" :aria-checked="mode === item" role="radio" :disabled="isStreaming" @click="mode = item">{{ item }}</button></div><span class="mode-hint">{{ mode === 'hybrid' ? '语义 + 关键词，推荐' : mode === 'vector' ? '语义相似度' : mode === 'agent' ? 'LLM 自主调用工具' : '关键词匹配' }}</span></div>
       <div class="composer"><textarea ref="composer" v-model="question" :disabled="isStreaming" rows="1" placeholder="询问 STM32、ESP-IDF 的技术细节…" @input="resizeComposer" @keydown="onKeydown"></textarea><div class="composer-actions"><span>Enter 发送 <i>·</i> Shift + Enter 换行</span><button v-if="isStreaming" class="stop-button" @click="stop">停止</button><button v-else class="send-button" :disabled="!question.trim()" aria-label="发送问题" @click="ask">↑</button></div></div>
       <p class="disclaimer">答案由技术手册检索生成，请结合引用原文进行验证。</p>
     </footer>
