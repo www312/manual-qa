@@ -76,9 +76,8 @@ def main() -> None:
     # 坏案例落盘（P2 弹药）
     hyb = results[-1]
     with open("data/miss_cases.txt", "w", encoding="utf-8") as f:
-        for m in hyb["misses"]:
-            f.write(m + "\n")
-    print(f"miss cases -> data/miss_cases.txt")
+        f.writelines(m + "\n" for m in hyb["misses"])
+    print("miss cases -> data/miss_cases.txt")
 
 
 if __name__ == "__main__":

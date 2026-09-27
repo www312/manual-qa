@@ -13,7 +13,7 @@ import json
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -69,7 +69,7 @@ def health() -> dict:
 @app.post("/api/ask")
 async def ask(body: AskBody):
     rag = get_rag()
-    assert _agent is not None
+    assert _agent is not None and rag is not None
     qid = f"q_{uuid.uuid4().hex[:12]}"
     t0 = time.time()
 
@@ -121,7 +121,7 @@ async def ask(body: AskBody):
 
             # 流式生成
             tok = 0
-            async for delta in rag.astream(body.question, hits):
+            async for delta in _rag.astream(body.question, hits):
                 tok += 1
                 yield {"event": "delta", "data": json.dumps({"text": delta}, ensure_ascii=False)}
 
@@ -131,7 +131,7 @@ async def ask(body: AskBody):
                     {"question_id": qid, "latency_ms": int((time.time() - t0) * 1000), "tokens": tok},
                 ),
             }
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:
             yield {"event": "error", "data": json.dumps({"message": str(ex)[:200]}, ensure_ascii=False)}
 
     return EventSourceResponse(gen())
@@ -139,7 +139,7 @@ async def ask(body: AskBody):
 
 @app.post("/api/search")
 def search(body: SearchBody) -> dict:
-    rag = get_rag()
+    get_rag()
     hits = _retriever.search(body.query, k=body.k, mode=body.mode)
     return {
         "results": [

@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, "src")
 
-from manual_qa.ingest import (  # noqa: E402
+from manual_qa.ingest import (
     TOC_LINE,
     _token_len,
     chunk_section,

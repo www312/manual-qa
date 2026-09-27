@@ -12,20 +12,16 @@
 from __future__ import annotations
 
 import jieba
-from qdrant_client import models
 from rank_bm25 import BM25Okapi
 
 from manual_qa.config import load_settings
 from manual_qa.llm import EmbeddingClient
 
-
 # 中文停用词：出题语言（中文）的高频虚词在英文语料中反而成了“稀有词”，
 # IDF 加权后严重干扰 BM25 打分（诊断：'的/是/多少' 把 HSEM 题顶到了蓝牙章节）。
-_CN_STOP = set(
-    "的 是 多少 什么 怎么 如何 哪些 对于 关于 以及 或者 但是 如果 请问 "
-    "地址 偏移 寄存器 位 值 类型 中 在 上 下 里 和 与 也 都 就 会 可 可以 "
-    "返回 软件 读取 进行 使用 设置 配置 进入 输出 输入".split()
-)
+_CN_STOP = {
+    "的", "是", "多少", "什么", "怎么", "如何", "哪些", "对于", "关于", "以及", "或者", "但是", "如果", "请问", "地址", "偏移", "寄存器", "位", "值", "类型", "中", "在", "上", "下", "里", "和", "与", "也", "都", "就", "会", "可", "可以", "返回", "软件", "读取", "进行", "使用", "设置", "配置", "进入", "输出", "输入",
+}
 
 
 def _tokenize(text: str, drop_stop: bool = False) -> list[str]:

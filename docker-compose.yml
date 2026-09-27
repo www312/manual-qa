@@ -1,0 +1,37 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+
+  app:
+    build: .
+    environment:
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-glm-4.7}
+      - EMBED_BASE_URL=${EMBED_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+      - EMBED_API_KEY=${EMBED_API_KEY}
+      - EMBED_MODEL=${EMBED_MODEL:-embedding-3}
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - qdrant
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - app
+
+volumes:
+  qdrant_data:

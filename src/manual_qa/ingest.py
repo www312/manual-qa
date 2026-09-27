@@ -28,7 +28,7 @@ ESP_HEADERS = re.compile(r"^(Chapter \d+\..*|\(续上页\))$")
 PAGE_NUM = re.compile(r"^\d{1,4}$")
 
 # 无信息量行：孤立页码、重复水印
-NOISE = re.compile(r"^(\s*|www\.st\.com\s*|STM32H742/743/753.*$)", re.I)
+NOISE = re.compile(r"^(\s*|www\.st\.com\s*|STM32H742/743/753.*$)", re.IGNORECASE)
 
 
 def clean_line(line: str, doc: str) -> str:
@@ -109,13 +109,13 @@ def table_to_md(tb) -> str:
 
 
 def ingest_pdf(
-    path: str,
+    pdf_path: str,
     doc: str,
     chunk_size: int = 512,
     overlap: int = 64,
     max_level: int = 3,
 ) -> list[Chunk]:
-    pdf = pymupdf.open(path)
+    pdf = pymupdf.open(pdf_path)
     toc = [t for t in pdf.get_toc() if t[0] <= max_level]
 
     # 页 -> 标题列表 映射（书签页码是 1-based）
@@ -131,16 +131,11 @@ def ingest_pdf(
         # 表格先行提取并占位替换，避免正文流里表格碎成行
         table_list = page.find_tables()
         tables = table_list.tables if table_list else []
-        for i, tb in enumerate(tables):
-            md = table_to_md(tb)
-            page.insert_text(
-                (72, 72), f"__TBL{i}__", overlay=False
-            ) if False else None
         # 用 textpage 方式拿到“表格区域外”的正文 + 表格占位拼接
         blocks = page.get_text("blocks")
         parts: list[str] = []
         for b in blocks:
-            x0, y0, x1, y1, txt, bno, btype = b
+            x0, y0, x1, y1, txt, _bno, btype = b
             if btype != 0:
                 continue
             lines = [clean_line(l, doc) for l in txt.split("\n")]

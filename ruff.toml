@@ -1,0 +1,8 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+ignore = [
+    "SIM115",  # 脚本式打开文件，进程生命周期即文件生命周期
+    "BLE001",  # 边界层需要兜底捕获
+]

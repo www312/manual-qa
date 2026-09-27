@@ -18,8 +18,14 @@ from manual_qa.ingest import Chunk
 from manual_qa.llm import EmbeddingClient
 
 
-def get_client(path: Path) -> QdrantClient:
-    return QdrantClient(path=str(path))
+def get_client(path: Path | None = None) -> QdrantClient:
+    """本地模式（默认）或 server 模式（QDRANT_URL 环境变量，Docker 部署用）。"""
+    import os
+
+    url = os.environ.get("QDRANT_URL")
+    if url:
+        return QdrantClient(url=url)
+    return QdrantClient(path=str(path or "./data/qdrant"))
 
 
 def build_index(chunks: list[Chunk] | list[dict], dim: int = 2048) -> dict:
@@ -65,12 +71,12 @@ def build_index(chunks: list[Chunk] | list[dict], dim: int = 2048) -> dict:
 
 if __name__ == "__main__":
     import json
-    import time
-
-    from manual_qa.ingest import ingest_pdf
 
     # 精选集优先（预算控制）；全量重跑用 data/chunks.jsonl
     import os
+    import time
+
+    from manual_qa.ingest import ingest_pdf
 
     subset = os.environ.get("CHUNKS_FILE", "data/chunks_selected.jsonl")
     if subset != "rebuild":

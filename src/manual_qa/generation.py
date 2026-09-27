@@ -62,7 +62,6 @@ class RAG:
         yield {"event": "citations", "data": hits}
 
         def gen() -> Iterator[str]:
-            for delta in self.llm.stream(self._messages(question, hits)):
-                yield delta
+            yield from self.llm.stream(self._messages(question, hits))
 
         yield {"event": "answer", "data": gen()}
