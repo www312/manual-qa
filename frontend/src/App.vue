@@ -99,8 +99,8 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
             <div class="answer-meta"><span class="answer-avatar">✦</span><span>手册助手</span><span class="answer-label">AI 回答</span></div>
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
             <div v-if="message.steps?.length" class="agent-steps"><div v-for="(step, idx) in message.steps" :key="idx" class="agent-step">{{ agentStepLine(step) }}</div></div>
-            <div v-else-if="message.error" class="answer error-answer">{{ message.text }}</div>
-            <div v-else class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text)"></div>
+            <div v-if="message.error" class="answer error-answer">{{ message.text }}</div>
+            <div v-else-if="message.text" class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text)"></div>
             <div v-if="message.text && !message.error" class="answer-footer"><span v-if="message.latency">检索与生成耗时 {{ (message.latency / 1000).toFixed(1) }}s</span><button v-if="lastQuestion && !isStreaming" @click="rerun">↻ 用当前模式重问</button></div>
             <div v-if="message.citations?.length" class="citations-panel">
               <div class="citations-heading"><span>引用来源</span><small>{{ message.citations.length }} 条相关内容</small></div>
