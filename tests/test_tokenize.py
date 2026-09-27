@@ -12,6 +12,18 @@ def test_register_name_kept_whole() -> None:
     assert "rcc_apb1enr" in toks, toks
 
 
+def test_glued_chip_prefix_split() -> None:
+    """用户连写 STM32GPIO：按芯片前缀边界拆开，否则 BM25 全灭。"""
+    toks = _tokenize("STM32GPIO 有多少个引脚")
+    assert "stm32" in toks and "gpio" in toks, toks
+    assert "stm32gpio" not in toks
+
+
+def test_esp32_glued_split() -> None:
+    toks = _tokenize("ESP32GPIO配置")
+    assert "esp32" in toks and "gpio" in toks, toks
+
+
 def test_api_name_kept_whole() -> None:
     toks = _tokenize("调用 esp_light_sleep_start() 进入休眠")
     assert "esp_light_sleep_start" in toks, toks

@@ -24,6 +24,20 @@ _CN_STOP = {
 }
 
 
+# 常见芯片系列前缀：用户常连写 "STM32GPIO"，保形切分会把它当成一个整词
+# 导致 BM25 全灭（RM0433 语料里不存在 "stm32gpio"）。切分时按边界拆开。
+_CHIP_PREFIXES = ("stm32", "esp32", "gd32", "ch32", "nrf52", "rp2040")
+
+
+def _split_ascii(token: str) -> list[str]:
+    """把粘连的 芯片前缀+外设词 拆开：stm32gpio -> stm32 gpio。"""
+    for p in _CHIP_PREFIXES:
+        if token.startswith(p) and len(token) > len(p):
+            rest = token[len(p) :]
+            return [p, rest.lower()]
+    return [token]
+
+
 def _tokenize(text: str, drop_stop: bool = False) -> list[str]:
     """混合分词：连续 ASCII 串（寄存器名/API名/路径）保持整词，中文走 jieba。
 
@@ -42,12 +56,12 @@ def _tokenize(text: str, drop_stop: bool = False) -> list[str]:
             buf += ch
         else:
             if buf:
-                out.append(buf.lower())
+                out.extend(_split_ascii(buf.lower()))
                 buf = ""
             if not ch.isspace():
                 cbuf += ch
     if buf:
-        out.append(buf.lower())
+        out.extend(_split_ascii(buf.lower()))
     if cbuf:
         out.extend(t for t in jieba.cut(cbuf) if t.strip())
     if drop_stop:
