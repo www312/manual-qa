@@ -94,7 +94,7 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
       </section>
       <section v-else class="message-list">
         <article v-for="message in messages" :key="message.id" :class="['message', message.role]">
-          <div v-if="message.role === 'user'" class="user-bubble">{{ message.text }}</div>
+          <div v-if="message.role === 'user'" class="user-line"><div class="user-text">{{ message.text }}</div></div>
           <div v-else class="answer-wrap">
             <div class="answer-meta"><span class="answer-avatar">✦</span><span>手册助手</span><span class="answer-label">AI 回答</span></div>
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
