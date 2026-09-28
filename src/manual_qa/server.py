@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from manual_qa.agent import AgentRAG
+from manual_qa.contextualize import Contextualizer
 from manual_qa.generation import RAG
 from manual_qa.ratelimit import rate_limit_ask
 from manual_qa.rerank import Reranker
@@ -36,10 +37,11 @@ _rag: RAG | None = None
 _rewriter: QueryRewriter | None = None
 _agent: AgentRAG | None = None
 _reranker: Reranker | None = None
+_ctx: Contextualizer | None = None
 
 
 def get_rag() -> RAG:
-    global _retriever, _rag, _rewriter, _agent, _reranker
+    global _retriever, _rag, _rewriter, _agent, _reranker, _ctx
     if _rag is None:
         import json as _json
 
@@ -49,6 +51,7 @@ def get_rag() -> RAG:
         _rewriter = QueryRewriter()
         _agent = AgentRAG(_retriever)
         _reranker = Reranker()
+        _ctx = Contextualizer()
         assert _retriever is not None and _rewriter is not None and _reranker is not None
     return _rag
 
@@ -57,6 +60,7 @@ class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     mode: str = Field(default="hybrid", pattern="^(vector|bm25|hybrid|agent)$")
     k: int = Field(default=5, ge=1, le=10)
+    history: list[dict[str, str]] | None = Field(default=None, max_length=10)
 
 
 class SearchBody(BaseModel):
@@ -80,9 +84,18 @@ async def ask(body: AskBody):
 
     async def gen():
         try:
+            # 多轮：带历史时先把追问改写成独立问题（下游全部无感知复用）
+            effective_q = (
+                _ctx.rewrite(body.question, body.history)
+                if body.history and _ctx is not None
+                else body.question
+            )
+            if effective_q != body.question:
+                yield {"event": "rewritten", "data": json.dumps({"question": effective_q}, ensure_ascii=False)}
+
             if body.mode == "agent":
                 # Agent 模式：LLM 自主决定是否/如何调用 manual_search
-                async for ev in _agent.run(body.question):
+                async for ev in _agent.run(effective_q):
                     if ev["type"] == "step":
                         yield {"event": "step", "data": json.dumps(
                             {"kind": ev["kind"], **({"query": ev["query"]} if "query" in ev else {}), **({"text": ev["text"]} if ev.get("text") else {})},
@@ -105,15 +118,15 @@ async def ask(body: AskBody):
             k_fetch = min(body.k * 2, 10)
             hits = (
                 _retriever.search_dual(
-                    body.question,
-                    _rewriter.rewrite(body.question),
+                    effective_q,
+                    _rewriter.rewrite(effective_q),
                     k=k_fetch,
                 )
                 if body.mode == "hybrid"
-                else _retriever.search(body.question, k=k_fetch, mode=body.mode)
+                else _retriever.search(effective_q, k=k_fetch, mode=body.mode)
             )
             if body.mode == "hybrid":
-                hits = _reranker.rerank(body.question, hits, top_n=body.k)
+                hits = _reranker.rerank(effective_q, hits, top_n=body.k)
             cites = [
                 {
                     "n": i + 1,
@@ -128,9 +141,9 @@ async def ask(body: AskBody):
             ]
             yield {"event": "citations", "data": json.dumps({"citations": cites}, ensure_ascii=False)}
 
-            # 流式生成
+            # 流式生成（用改写后的独立问题，避免代词进入生成上下文）
             tok = 0
-            async for delta in _rag.astream(body.question, hits):
+            async for delta in _rag.astream(effective_q, hits):
                 tok += 1
                 yield {"event": "delta", "data": json.dumps({"text": delta}, ensure_ascii=False)}
 

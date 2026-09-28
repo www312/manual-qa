@@ -4,7 +4,7 @@ import { computed, nextTick, ref } from 'vue'
 type SearchMode = 'vector' | 'bm25' | 'hybrid' | 'agent'
 type Citation = { n: number; chunk_id: string; doc: string; chapter: string; page: number; score: number; snippet: string }
 type AgentStep = { kind: string; query?: string; text?: string }
-type Message = { id: number; role: 'user' | 'assistant'; text: string; citations?: Citation[]; loading?: boolean; error?: boolean; latency?: number; steps?: AgentStep[] }
+type Message = { id: number; role: 'user' | 'assistant'; text: string; citations?: Citation[]; loading?: boolean; error?: boolean; latency?: number; steps?: AgentStep[]; rewritten?: string }
 type StreamPayload = Record<string, unknown>
 
 const examples = [
@@ -49,11 +49,22 @@ async function ask(value = question.value) {
   isStreaming.value = true
   controller = new AbortController()
   scrollToBottom()
+  // 多轮：带最近 3 轮问答（上一条 assistant 消息的 text 作为答案）
+  const history = messages.value
+    .filter(m => m.role === 'user')
+    .slice(-4, -1) // 之前的轮次（不含本次刚推入的 user）
+    .map((m, i, arr) => {
+      const idx = messages.value.indexOf(m)
+      const ans = messages.value.slice(idx + 1).find(x => x.role === 'assistant')
+      return { q: m.text, a: ans?.text?.slice(0, 300) ?? '' }
+    })
+    .filter(t => t.a)
   try {
-    const response = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify({ question: text, mode: mode.value, k: 5 }), signal: controller.signal })
+    const response = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify({ question: text, mode: mode.value, k: 5, history: history.length ? history : undefined }), signal: controller.signal })
     if (!response.ok || !response.body) throw new Error(`请求失败（${response.status}）`)
     await readSse(response.body, (event, payload) => {
-      if (event === 'citations') { answerMessage.citations = Array.isArray(payload.citations) ? payload.citations as Citation[] : []; answerMessage.loading = false }
+      if (event === 'rewritten' && typeof payload.question === 'string' && payload.question !== text) { answerMessage.rewritten = payload.question; scrollToBottom() }
+      else if (event === 'citations') { answerMessage.citations = Array.isArray(payload.citations) ? payload.citations as Citation[] : []; answerMessage.loading = false }
       else if (event === 'step' && answerMessage.steps) { answerMessage.steps.push(payload as AgentStep); answerMessage.loading = false; if (payload.kind === 'answer' && typeof payload.text === 'string') answerMessage.text += payload.text; scrollToBottom() }
       else if (event === 'delta' && typeof payload.text === 'string') { answerMessage.loading = false; answerMessage.text += payload.text; scrollToBottom() }
       else if (event === 'done' && typeof payload.latency_ms === 'number') answerMessage.latency = payload.latency_ms
@@ -110,6 +121,7 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
         <article v-for="message in messages" :key="message.id" :class="['message', message.role]">
           <div v-if="message.role === 'user'" class="user-line"><div class="user-text">{{ message.text }}</div></div>
           <div v-else class="answer-wrap">
+            <div v-if="message.rewritten" class="rewritten-note" title="多轮追问已自动改写为独立问题">↻ 理解为：{{ message.rewritten }}</div>
             <div class="answer-meta"><span class="answer-avatar">✦</span><span>手册助手</span><span class="answer-label">AI 回答</span></div>
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
             <div v-if="message.steps?.length" class="agent-steps"><div v-for="(step, idx) in message.steps" :key="idx" class="agent-step">{{ agentStepLine(step) }}</div></div>

@@ -464,3 +464,15 @@ body {
   margin-left: 6px;
 }
 .retry-link:hover { opacity: 0.8; }
+
+.rewritten-note {
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  margin-bottom: 8px;
+  display: inline-block;
+  font-family: var(--mono);
+}
