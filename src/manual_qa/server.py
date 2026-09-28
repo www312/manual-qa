@@ -20,10 +20,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from manual_qa.agent import AgentRAG
 from manual_qa.generation import RAG
+from manual_qa.ratelimit import rate_limit_ask
 from manual_qa.retrieval import Retriever
 from manual_qa.rewrite import QueryRewriter
 
 app = FastAPI(title="manual-qa", version="0.1.0")
+app.middleware("http")(rate_limit_ask)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
