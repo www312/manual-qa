@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 type SearchMode = 'vector' | 'bm25' | 'hybrid' | 'agent'
 type Citation = { n: number; chunk_id: string; doc: string; chapter: string; page: number; score: number; snippet: string }
@@ -113,7 +115,17 @@ function resizeComposer() {
   element.style.height = `${Math.min(element.scrollHeight, 160)}px`
 }
 function scrollToBottom() { nextTick(() => conversation.value?.scrollTo({ top: conversation.value.scrollHeight, behavior: 'smooth' })) }
-function renderAnswer(text: string): string { return text.replace(/\[(\d+)\]/g, '<sup class="inline-citation" data-citation="$1">[$1]</sup>') }
+function renderAnswer(text: string, streaming = false): string {
+  if (streaming) {
+    // 流式期间轻渲染：只做换行 + 引用上标（避免半截 markdown 全量重渲染闪烁）
+    const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return escaped.replace(/\[(\d+)\]/g, '<sup class="inline-citation" data-citation="$1">[$1]</sup>').replace(/\n/g, '<br>')
+  }
+  // 完成态：完整 markdown 渲染 + XSS 消毒（LLM 输出是不可信输入）
+  const markedText = marked.parse(text, { async: false, gfm: true, breaks: true }) as string
+  const withCitations = markedText.replace(/\[(\d+)\]/g, '<sup class="inline-citation" data-citation="$1">[$1]</sup>')
+  return DOMPurify.sanitize(withCitations, { ADD_ATTR: ['data-citation'] })
+}
 function handleAnswerClick(event: MouseEvent) {
   const target = event.target as HTMLElement
   const n = target.dataset.citation
@@ -207,7 +219,7 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
             <div v-if="message.loading" class="skeleton" aria-label="正在检索引用"><span></span><span></span><span></span></div>
             <div v-if="message.steps?.length" class="agent-steps"><div v-for="(step, idx) in message.steps" :key="idx" class="agent-step">{{ agentStepLine(step) }}</div></div>
             <div v-if="message.error" class="answer error-answer">{{ message.text }} <button v-if="message.error && !isStreaming" class="retry-link" @click="retryMessage(message.id)">点击重试</button></div>
-            <div v-else-if="message.text" class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text)"></div>
+            <div v-else-if="message.text" class="answer" @click="handleAnswerClick" v-html="renderAnswer(message.text, isStreaming)"></div>
             <div v-if="message.text && !message.error" class="answer-footer"><span v-if="message.latency">检索与生成耗时 {{ (message.latency / 1000).toFixed(1) }}s</span><button v-if="lastQuestion && !isStreaming" @click="rerun">↻ 用当前模式重问</button></div>
             <div v-if="message.citations?.length" class="citations-panel">
               <div class="citations-heading"><span>引用来源</span><small>{{ message.citations.length }} 条相关内容</small></div>
