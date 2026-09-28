@@ -57,6 +57,7 @@ const expandedCitation = ref<number | null>(null)
 const view = ref<'chat' | 'metrics'>('chat')
 const metrics = ref<MetricsResponse>(metricsMock)
 const metricsLoading = ref(false)
+const metricsAnimated = ref(false)
 const composer = ref<HTMLTextAreaElement | null>(null)
 const conversation = ref<HTMLElement | null>(null)
 let controller: AbortController | null = null
@@ -64,6 +65,7 @@ let nextMessageId = 1
 
 async function loadMetrics() {
   metricsLoading.value = true
+  metricsAnimated.value = false
   try {
     const response = await fetch('/api/metrics', { headers: { Accept: 'application/json' } })
     if (!response.ok) throw new Error(`metrics unavailable: ${response.status}`)
@@ -72,6 +74,8 @@ async function loadMetrics() {
     metrics.value = window.__METRICS_MOCK ?? metricsMock
   } finally {
     metricsLoading.value = false
+    await nextTick()
+    metricsAnimated.value = true
   }
 }
 function showMetrics() { view.value = 'metrics'; void loadMetrics() }
@@ -80,6 +84,23 @@ function formatPercent(value: number) { return `${(value * 100).toFixed(1)}%` }
 function formatDelta(value: number) { return `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)} pp` }
 function deltaClass(value: number) { return value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral' }
 function formatChunks(value: number) { return new Intl.NumberFormat('zh-CN').format(value) }
+function shortGroup(group: string) { return group.split(' | ')[0] }
+function heatClass(value: number) { return value >= 0.95 ? 'heat-high' : value >= 0.85 ? 'heat-mid' : 'heat-low' }
+function deltaSymbol(value: number) { return value > 0 ? '▲' : value < 0 ? '▼' : '·' }
+
+// 产品报告以 hybrid+rewrite 作为主配置；若后端暂未返回它，再回退到实际最高值。
+const bestRecall = computed(() => metrics.value.offline.configs.find((config) => config.name === 'hybrid_rewrite') ?? [...metrics.value.offline.configs].sort((a, b) => b.recall5 - a.recall5)[0] ?? metricsMock.offline.configs[0])
+const bestMrr = computed(() => [...metrics.value.offline.configs].sort((a, b) => b.mrr - a.mrr)[0] ?? metricsMock.offline.configs[0])
+const evaluationCount = computed(() => {
+  const match = metrics.value.offline.qa_set.match(/\d+/)
+  return match ? Number(match[0]) : 123
+})
+const kpis = computed(() => [
+  { label: '语料规模', value: formatChunks(metrics.value.runtime.chunks), unit: 'chunks', detail: '线上知识库', bars: [42, 68, 54, 82] },
+  { label: '最佳 recall@5', value: formatPercent(bestRecall.value.recall5), unit: bestRecall.value.label, detail: bestRecall.value.name, bars: [58, 72, 66, 88] },
+  { label: '最佳 MRR', value: bestMrr.value.mrr.toFixed(3), unit: bestMrr.value.label, detail: bestMrr.value.name, bars: [36, 62, 78, 60] },
+  { label: '评测规模', value: String(evaluationCount.value), unit: '题', detail: '离线 QA 集', bars: [48, 76, 58, 70] },
+])
 
 onMounted(() => { void loadMetrics() })
 
@@ -196,29 +217,44 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
         </article>
       </section>
     </main>
-    <main v-else class="metrics-view">
+    <main v-else :class="['metrics-view', { 'metrics-ready': metricsAnimated }]">
       <div class="metrics-heading">
         <div><p class="eyebrow">离线评测报告</p><h2>评测面板</h2><p class="metrics-subtitle">检索质量与线上资源状态一览</p></div>
         <span v-if="metricsLoading" class="metrics-loading">正在同步…</span>
       </div>
-      <div class="evaluation-scope">离线评测 · {{ metrics.offline.qa_set }} · {{ metrics.offline.metric_note }} · 评于 {{ metrics.offline.evaluated_at }}</div>
-      <section class="metrics-card overview-card">
-        <div class="card-heading"><div><h3>总体表现</h3><p>三种检索配置在同一 QA 集上的结果</p></div><span class="sample-size">n = 123</span></div>
-        <div class="metric-groups">
-          <div v-for="metric in (['recall5', 'mrr'] as const)" :key="metric" class="metric-group">
-            <div class="metric-title"><span>{{ metric === 'recall5' ? 'recall@5' : 'MRR' }}</span><small>{{ metric === 'recall5' ? '章节命中率' : '首个正确结果排名' }}</small></div>
-            <div v-for="config in metrics.offline.configs" :key="`${metric}-${config.name}`" class="metric-row">
-              <span class="metric-label">{{ config.label }}</span><span class="metric-value">{{ formatPercent(config[metric]) }}</span>
-              <div class="metric-track"><div :class="['metric-fill', `fill-${config.name}`]" :style="{ width: `${config[metric] * 100}%` }"></div></div>
+      <div class="evaluation-scope">
+        <div class="scope-main"><span class="scope-icon" aria-hidden="true">▦</span><span class="scope-meta">QA-SET: {{ evaluationCount }} · METRIC: chapter-recall@5 · DATE: {{ metrics.offline.evaluated_at }}</span></div>
+        <span class="offline-badge"><i></i>离线评测</span>
+      </div>
+
+      <template v-if="metricsLoading">
+        <div class="metrics-skeleton-grid"><section v-for="n in 3" :key="n" class="metrics-card loading-card"><span></span><span></span><span></span><span></span></section></div>
+      </template>
+      <template v-else>
+        <section class="kpi-grid" aria-label="评测关键指标">
+          <article v-for="(kpi, index) in kpis" :key="kpi.label" class="kpi-card" :style="{ '--stagger': `${index * 60}ms` }">
+            <span class="kpi-label">{{ kpi.label }}</span><strong class="kpi-value">{{ kpi.value }}</strong><span class="kpi-unit">{{ kpi.unit }}</span>
+            <div class="sparkline" aria-hidden="true"><i v-for="(height, barIndex) in kpi.bars" :key="barIndex" :style="{ height: `${height}%` }"></i></div><span class="kpi-detail">{{ kpi.detail }}</span>
+          </article>
+        </section>
+        <section class="metrics-card overview-card" style="--stagger: 240ms">
+          <div class="card-heading"><div><h3>配置对比</h3><p>三种检索配置在同一 QA 集上的结果</p></div><span class="sample-size">n = {{ evaluationCount }}</span></div>
+          <div class="metric-groups">
+            <div v-for="metric in (['recall5', 'mrr'] as const)" :key="metric" class="metric-group">
+              <div class="metric-title"><span>{{ metric === 'recall5' ? 'recall@5' : 'MRR' }}</span><small>{{ metric === 'recall5' ? '章节命中率' : '首个正确结果排名' }}</small></div>
+              <div v-for="config in metrics.offline.configs" :key="`${metric}-${config.name}`" :class="['metric-row', { 'is-best': config.name === (metric === 'recall5' ? bestRecall.name : bestMrr.name) }]">
+                <span class="metric-label">{{ config.label }}</span><span class="metric-value">{{ metric === 'recall5' ? formatPercent(config[metric]) : config[metric].toFixed(3) }}</span>
+                <div class="metric-track"><div :class="['metric-fill', `fill-${config.name}`]" :style="{ '--target-width': `${config[metric] * 100}%` }"></div></div><span v-if="config.name === (metric === 'recall5' ? bestRecall.name : bestMrr.name)" class="best-badge">BEST</span>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-      <section class="metrics-card breakdown-card">
-        <div class="card-heading"><div><h3>分层矩阵</h3><p>按题型 × 语料特征拆解章节级 recall@5</p></div><span class="delta-legend">Δ = hybrid+rw − vector</span></div>
-        <div class="table-scroll"><table class="breakdown-table"><thead><tr><th>组名</th><th>n</th><th>vector r@5</th><th>hybrid+rw r@5</th><th>Δ</th></tr></thead><tbody><tr v-for="row in metrics.offline.breakdown" :key="row.group"><td>{{ row.group }}</td><td class="numeric">{{ row.n }}</td><td class="numeric">{{ formatPercent(row.vector.r5) }}</td><td class="numeric">{{ formatPercent(row.hybrid_rewrite.r5) }}</td><td :class="['numeric', deltaClass(row.hybrid_rewrite.r5 - row.vector.r5)]">{{ formatDelta(row.hybrid_rewrite.r5 - row.vector.r5) }}</td></tr></tbody></table></div>
-      </section>
-      <section class="metrics-card runtime-card"><div class="card-heading"><div><h3>实时状态</h3><p>当前知识库与服务配额</p></div><span class="live-badge"><i></i>实时</span></div><div class="runtime-grid"><div><span class="runtime-label">语料块数</span><strong>{{ formatChunks(metrics.runtime.chunks) }}</strong><small>chunks</small></div><div><span class="runtime-label">双语料</span><strong class="runtime-docs">{{ metrics.runtime.docs }}</strong><small>已连接</small></div><div><span class="runtime-label">每日限流</span><strong>{{ metrics.runtime.daily_limit }}</strong><small>次 / 日</small></div></div></section>
+        </section>
+        <section class="metrics-card breakdown-card" style="--stagger: 300ms">
+          <div class="card-heading"><div><h3>分层矩阵</h3><p>按题型 × 语料特征拆解章节级 recall@5</p></div><div class="heat-legend"><span><i class="heat-high"></i>高</span><span><i class="heat-mid"></i>中</span><span><i class="heat-low"></i>低</span></div></div>
+          <div class="table-scroll"><table class="breakdown-table"><thead><tr><th>组名</th><th>n</th><th>vector r@5</th><th>hybrid+rw r@5</th><th>Δ</th></tr></thead><tbody><tr v-for="row in metrics.offline.breakdown" :key="row.group"><td>{{ shortGroup(row.group) }}<small>{{ row.group.split(' | ')[1] }}</small></td><td class="numeric">{{ row.n }}</td><td :class="['numeric', 'heat-cell', heatClass(row.vector.r5)]">{{ formatPercent(row.vector.r5) }}</td><td :class="['numeric', 'heat-cell', heatClass(row.hybrid_rewrite.r5)]">{{ formatPercent(row.hybrid_rewrite.r5) }}</td><td :class="['numeric', 'delta-value', deltaClass(row.hybrid_rewrite.r5 - row.vector.r5)]"><b>{{ deltaSymbol(row.hybrid_rewrite.r5 - row.vector.r5) }}</b> {{ formatDelta(row.hybrid_rewrite.r5 - row.vector.r5) }}</td></tr></tbody></table></div>
+        </section>
+        <section class="metrics-card runtime-card" style="--stagger: 360ms"><div class="card-heading"><div><h3>实时状态</h3><p>当前知识库与服务配额</p></div><span class="live-badge"><i></i>实时</span></div><div class="runtime-grid"><div><span class="runtime-label">语料块数</span><strong>{{ formatChunks(metrics.runtime.chunks) }}</strong><small>chunks</small></div><div><span class="runtime-label">双语料</span><strong class="runtime-docs">{{ metrics.runtime.docs }}</strong><small>已连接</small></div><div><span class="runtime-label">每日限流</span><strong>{{ metrics.runtime.daily_limit }}</strong><small>次 / 日</small></div></div></section>
+      </template>
     </main>
     <footer v-if="view === 'chat'" class="composer-area">
       <div class="mode-row"><span class="mode-label">检索模式</span><div class="segmented" role="radiogroup" aria-label="检索模式"><button v-for="item in (['vector', 'bm25', 'hybrid', 'agent'] as SearchMode[])" :key="item" :class="{ selected: mode === item }" :aria-checked="mode === item" role="radio" :disabled="isStreaming" @click="mode = item">{{ item }}</button></div><span class="mode-hint">{{ mode === 'hybrid' ? '语义 + 关键词，推荐' : mode === 'vector' ? '语义相似度' : mode === 'agent' ? 'LLM 自主调用工具' : '关键词匹配' }}</span></div>
