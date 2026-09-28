@@ -21,6 +21,7 @@ from sse_starlette.sse import EventSourceResponse
 from manual_qa.agent import AgentRAG
 from manual_qa.generation import RAG
 from manual_qa.ratelimit import rate_limit_ask
+from manual_qa.rerank import Reranker
 from manual_qa.retrieval import Retriever
 from manual_qa.rewrite import QueryRewriter
 
@@ -34,10 +35,11 @@ _retriever: Retriever | None = None
 _rag: RAG | None = None
 _rewriter: QueryRewriter | None = None
 _agent: AgentRAG | None = None
+_reranker: Reranker | None = None
 
 
 def get_rag() -> RAG:
-    global _retriever, _rag, _rewriter
+    global _retriever, _rag, _rewriter, _agent, _reranker
     if _rag is None:
         import json as _json
 
@@ -45,8 +47,9 @@ def get_rag() -> RAG:
         _retriever = Retriever(chunks)
         _rag = RAG(_retriever)
         _rewriter = QueryRewriter()
-        globals()["_agent"] = AgentRAG(_retriever)
-        assert _retriever is not None and _rewriter is not None
+        _agent = AgentRAG(_retriever)
+        _reranker = Reranker()
+        assert _retriever is not None and _rewriter is not None and _reranker is not None
     return _rag
 
 
@@ -97,16 +100,20 @@ async def ask(body: AskBody):
                             {"question_id": qid, "latency_ms": int((time.time() - t0) * 1000), "tokens": 0})}
                 return
 
-            # 检索（P2 配置C：向量用原查询，BM25 用改写查询）
+            # 检索 + LLM 重排（粗排 k*2 召回 → listwise 精排取前 k）
+            # 解决近邻干扰：APB1ENR(旧名)/APB1LENR/APB1LLPENR 字面极近，召回分不开，重排能按语义排
+            k_fetch = min(body.k * 2, 10)
             hits = (
                 _retriever.search_dual(
                     body.question,
                     _rewriter.rewrite(body.question),
-                    k=body.k,
+                    k=k_fetch,
                 )
                 if body.mode == "hybrid"
-                else _retriever.search(body.question, k=body.k, mode=body.mode)
+                else _retriever.search(body.question, k=k_fetch, mode=body.mode)
             )
+            if body.mode == "hybrid":
+                hits = _reranker.rerank(body.question, hits, top_n=body.k)
             cites = [
                 {
                     "n": i + 1,
