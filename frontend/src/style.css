@@ -74,6 +74,58 @@ body {
   background: #10b981;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
 }
+.topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.topbar-actions .topbar-status { margin-left: 0; }
+.metrics-toggle {
+  border: 1px solid var(--border-2); border-radius: 7px; background: var(--card); color: var(--text);
+  font: inherit; font-size: 12px; padding: 5px 11px; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.metrics-toggle:hover { background: var(--bg); border-color: var(--text-3); }
+
+/* ---------- 评测面板 ---------- */
+.metrics-view { flex: 1; overflow-y: auto; padding: 28px 4px 32px; }
+.metrics-heading { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+.eyebrow { color: var(--text-3); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 2px; }
+.metrics-heading h2 { font-size: 26px; letter-spacing: -0.03em; line-height: 1.2; }
+.metrics-subtitle { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+.metrics-loading { color: var(--text-3); font-size: 12px; padding-top: 7px; }
+.evaluation-scope { background: #f3f4f6; border: 1px solid var(--border); border-radius: var(--radius-s); color: var(--text-2); font-size: 12px; line-height: 1.6; padding: 10px 12px; margin-bottom: 16px; }
+.metrics-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+.card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.card-heading h3 { font-size: 15px; font-weight: 650; }
+.card-heading p { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.sample-size, .delta-legend { color: var(--text-3); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.metric-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.metric-group { min-width: 0; }
+.metric-title { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 10px; }
+.metric-title span { font-family: var(--mono); font-size: 13px; font-weight: 650; }
+.metric-title small { color: var(--text-3); font-size: 11px; }
+.metric-row { display: grid; grid-template-columns: 118px 48px 1fr; align-items: center; gap: 8px; margin: 12px 0; }
+.metric-label { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-value { font-family: var(--mono); font-size: 12px; text-align: right; }
+.metric-track { height: 8px; background: #f3f4f6; border-radius: 99px; overflow: hidden; }
+.metric-fill { height: 100%; border-radius: inherit; transition: width 0.4s ease; }
+.fill-vector { background: #9ca3af; }
+.fill-hybrid { background: #4b5563; }
+.fill-hybrid_rewrite { background: #111827; }
+.table-scroll { overflow-x: auto; }
+.breakdown-table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 12.5px; }
+.breakdown-table th, .breakdown-table td { border-bottom: 1px solid var(--border); padding: 10px 8px; text-align: left; }
+.breakdown-table th { color: var(--text-3); font-size: 11px; font-weight: 550; letter-spacing: 0.02em; white-space: nowrap; }
+.breakdown-table td:first-child { max-width: 260px; }
+.breakdown-table tr:last-child td { border-bottom: none; }
+.numeric { font-family: var(--mono); text-align: right !important; white-space: nowrap; }
+.positive { color: #10b981; }
+.negative { color: #ef4444; }
+.neutral { color: var(--text-3); }
+.live-badge { color: #10b981; font-size: 11px; display: inline-flex; align-items: center; gap: 6px; }
+.live-badge i { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+.runtime-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.runtime-grid > div { background: var(--bg); border-radius: var(--radius-s); padding: 14px; display: flex; flex-direction: column; min-height: 90px; }
+.runtime-label { color: var(--text-3); font-size: 11px; margin-bottom: 7px; }
+.runtime-grid strong { font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.2; }
+.runtime-grid small { color: var(--text-3); font-size: 11px; margin-top: 3px; }
+.runtime-docs { font-family: inherit !important; font-size: 15px !important; }
 
 /* ---------- 对话区（文档流） ---------- */
 .conversation {
@@ -450,6 +502,17 @@ body {
   .example-grid { grid-template-columns: 1fr; }
   .topbar p { display: none; }
   .message.user .user-text { max-width: 92%; }
+  .topbar { gap: 10px; }
+  .topbar-actions { gap: 8px; }
+  .topbar-status { font-size: 0; }
+  .topbar-status i { margin-right: 2px; }
+  .metrics-view { padding-top: 22px; }
+  .metrics-heading h2 { font-size: 23px; }
+  .evaluation-scope { font-size: 11px; }
+  .metric-groups { grid-template-columns: 1fr; gap: 22px; }
+  .metric-row { grid-template-columns: 108px 45px minmax(100px, 1fr); }
+  .metrics-card { padding: 14px; }
+  .runtime-grid { grid-template-columns: 1fr; }
 }
 
 .retry-link {

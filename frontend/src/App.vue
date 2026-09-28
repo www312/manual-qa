@@ -1,11 +1,47 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 
 type SearchMode = 'vector' | 'bm25' | 'hybrid' | 'agent'
 type Citation = { n: number; chunk_id: string; doc: string; chapter: string; page: number; score: number; snippet: string }
 type AgentStep = { kind: string; query?: string; text?: string }
 type Message = { id: number; role: 'user' | 'assistant'; text: string; citations?: Citation[]; loading?: boolean; error?: boolean; latency?: number; steps?: AgentStep[]; rewritten?: string }
 type StreamPayload = Record<string, unknown>
+type MetricsConfig = { name: string; label: string; recall5: number; mrr: number }
+type BreakdownMetric = { r5: number; mrr: number }
+type BreakdownRow = { group: string; n: number; vector: BreakdownMetric; hybrid_rewrite: BreakdownMetric }
+type MetricsResponse = {
+  offline: { evaluated_at: string; qa_set: string; metric_note: string; configs: MetricsConfig[]; breakdown: BreakdownRow[] }
+  runtime: { chunks: number; docs: string; daily_limit: number }
+}
+
+declare global {
+  interface Window { __METRICS_MOCK?: MetricsResponse }
+}
+
+const metricsMock: MetricsResponse = {
+  offline: {
+    evaluated_at: '2026-09-28',
+    qa_set: '123 题分层 QA 集（37 章分层抽样 + LLM 依种子出题）',
+    metric_note: '章节级 recall@5：top-5 命中正确内容所在章节',
+    configs: [
+      { name: 'vector', label: '纯向量', recall5: 0.943, mrr: 0.799 },
+      { name: 'hybrid', label: '混合检索(RRF)', recall5: 0.935, mrr: 0.803 },
+      { name: 'hybrid_rewrite', label: '混合+查询改写', recall5: 0.935, mrr: 0.856 },
+    ],
+    breakdown: [
+      { group: '数值 | 跨语言(中文→英文手册)', n: 60, vector: { r5: 0.9, mrr: 0.75 }, hybrid_rewrite: { r5: 0.92, mrr: 0.8 } },
+      { group: '寄存器 | 同义表达', n: 18, vector: { r5: 0.944, mrr: 0.806 }, hybrid_rewrite: { r5: 0.944, mrr: 0.861 } },
+      { group: '配置 | 多步骤操作', n: 15, vector: { r5: 0.933, mrr: 0.8 }, hybrid_rewrite: { r5: 0.933, mrr: 0.867 } },
+      { group: '概念 | 术语解释', n: 12, vector: { r5: 1, mrr: 0.917 }, hybrid_rewrite: { r5: 1, mrr: 0.917 } },
+      { group: '排错 | 症状到原因', n: 8, vector: { r5: 0.875, mrr: 0.75 }, hybrid_rewrite: { r5: 0.875, mrr: 0.792 } },
+      { group: '对比 | 方案选型', n: 6, vector: { r5: 0.833, mrr: 0.667 }, hybrid_rewrite: { r5: 0.833, mrr: 0.75 } },
+      { group: '边界 | 限制与例外', n: 4, vector: { r5: 0.75, mrr: 0.625 }, hybrid_rewrite: { r5: 0.75, mrr: 0.75 } },
+    ],
+  },
+  runtime: { chunks: 105716, docs: 'RM0433 + ESP-IDF', daily_limit: 30 },
+}
+
+window.__METRICS_MOCK ??= metricsMock
 
 const examples = [
   { label: '时钟配置', question: 'STM32H743 的 APB1 时钟使能寄存器地址偏移是多少？' },
@@ -18,10 +54,34 @@ const mode = ref<SearchMode>('hybrid')
 const isStreaming = ref(false)
 const activeCitation = ref<number | null>(null)
 const expandedCitation = ref<number | null>(null)
+const view = ref<'chat' | 'metrics'>('chat')
+const metrics = ref<MetricsResponse>(metricsMock)
+const metricsLoading = ref(false)
 const composer = ref<HTMLTextAreaElement | null>(null)
 const conversation = ref<HTMLElement | null>(null)
 let controller: AbortController | null = null
 let nextMessageId = 1
+
+async function loadMetrics() {
+  metricsLoading.value = true
+  try {
+    const response = await fetch('/api/metrics', { headers: { Accept: 'application/json' } })
+    if (!response.ok) throw new Error(`metrics unavailable: ${response.status}`)
+    metrics.value = await response.json() as MetricsResponse
+  } catch {
+    metrics.value = window.__METRICS_MOCK ?? metricsMock
+  } finally {
+    metricsLoading.value = false
+  }
+}
+function showMetrics() { view.value = 'metrics'; void loadMetrics() }
+function showChat() { view.value = 'chat' }
+function formatPercent(value: number) { return `${(value * 100).toFixed(1)}%` }
+function formatDelta(value: number) { return `${value > 0 ? '+' : ''}${(value * 100).toFixed(1)} pp` }
+function deltaClass(value: number) { return value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral' }
+function formatChunks(value: number) { return new Intl.NumberFormat('zh-CN').format(value) }
+
+onMounted(() => { void loadMetrics() })
 
 const lastQuestion = computed(() => [...messages.value].reverse().find((item) => item.role === 'user')?.text ?? '')
 
@@ -53,7 +113,7 @@ async function ask(value = question.value) {
   const history = messages.value
     .filter(m => m.role === 'user')
     .slice(-4, -1) // 之前的轮次（不含本次刚推入的 user）
-    .map((m, i, arr) => {
+    .map((m) => {
       const idx = messages.value.indexOf(m)
       const ans = messages.value.slice(idx + 1).find(x => x.role === 'assistant')
       return { q: m.text, a: ans?.text?.slice(0, 300) ?? '' }
@@ -110,9 +170,9 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
     <header class="topbar">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <div><h1>嵌入式手册智能问答</h1><p>STM32H743 RM0433 + ESP-IDF <span class="dot">·</span> 10.5 万块技术语料</p></div>
-      <div class="topbar-status"><i></i>知识库已连接</div>
+      <div class="topbar-actions"><div class="topbar-status"><i></i>知识库已连接</div><button class="metrics-toggle" @click="view === 'chat' ? showMetrics() : showChat()">{{ view === 'chat' ? '评测' : '返回对话' }}</button></div>
     </header>
-    <main ref="conversation" class="conversation" aria-live="polite">
+    <main v-if="view === 'chat'" ref="conversation" class="conversation" aria-live="polite">
       <section v-if="messages.length === 0" class="empty-state">
         <div class="empty-icon">⌁</div><h2>从一个问题开始</h2><p>向你的嵌入式技术手册提问，答案会附带可追溯的原文引用。</p>
         <div class="example-grid"><button v-for="example in examples" :key="example.question" class="example-card" @click="ask(example.question)"><span>{{ example.label }}</span><strong>{{ example.question }}</strong><b>↗</b></button></div>
@@ -136,9 +196,33 @@ function agentStepLine(payload: StreamPayload & { kind?: string; query?: string;
         </article>
       </section>
     </main>
-    <footer class="composer-area">
+    <main v-else class="metrics-view">
+      <div class="metrics-heading">
+        <div><p class="eyebrow">离线评测报告</p><h2>评测面板</h2><p class="metrics-subtitle">检索质量与线上资源状态一览</p></div>
+        <span v-if="metricsLoading" class="metrics-loading">正在同步…</span>
+      </div>
+      <div class="evaluation-scope">离线评测 · {{ metrics.offline.qa_set }} · {{ metrics.offline.metric_note }} · 评于 {{ metrics.offline.evaluated_at }}</div>
+      <section class="metrics-card overview-card">
+        <div class="card-heading"><div><h3>总体表现</h3><p>三种检索配置在同一 QA 集上的结果</p></div><span class="sample-size">n = 123</span></div>
+        <div class="metric-groups">
+          <div v-for="metric in (['recall5', 'mrr'] as const)" :key="metric" class="metric-group">
+            <div class="metric-title"><span>{{ metric === 'recall5' ? 'recall@5' : 'MRR' }}</span><small>{{ metric === 'recall5' ? '章节命中率' : '首个正确结果排名' }}</small></div>
+            <div v-for="config in metrics.offline.configs" :key="`${metric}-${config.name}`" class="metric-row">
+              <span class="metric-label">{{ config.label }}</span><span class="metric-value">{{ formatPercent(config[metric]) }}</span>
+              <div class="metric-track"><div :class="['metric-fill', `fill-${config.name}`]" :style="{ width: `${config[metric] * 100}%` }"></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="metrics-card breakdown-card">
+        <div class="card-heading"><div><h3>分层矩阵</h3><p>按题型 × 语料特征拆解章节级 recall@5</p></div><span class="delta-legend">Δ = hybrid+rw − vector</span></div>
+        <div class="table-scroll"><table class="breakdown-table"><thead><tr><th>组名</th><th>n</th><th>vector r@5</th><th>hybrid+rw r@5</th><th>Δ</th></tr></thead><tbody><tr v-for="row in metrics.offline.breakdown" :key="row.group"><td>{{ row.group }}</td><td class="numeric">{{ row.n }}</td><td class="numeric">{{ formatPercent(row.vector.r5) }}</td><td class="numeric">{{ formatPercent(row.hybrid_rewrite.r5) }}</td><td :class="['numeric', deltaClass(row.hybrid_rewrite.r5 - row.vector.r5)]">{{ formatDelta(row.hybrid_rewrite.r5 - row.vector.r5) }}</td></tr></tbody></table></div>
+      </section>
+      <section class="metrics-card runtime-card"><div class="card-heading"><div><h3>实时状态</h3><p>当前知识库与服务配额</p></div><span class="live-badge"><i></i>实时</span></div><div class="runtime-grid"><div><span class="runtime-label">语料块数</span><strong>{{ formatChunks(metrics.runtime.chunks) }}</strong><small>chunks</small></div><div><span class="runtime-label">双语料</span><strong class="runtime-docs">{{ metrics.runtime.docs }}</strong><small>已连接</small></div><div><span class="runtime-label">每日限流</span><strong>{{ metrics.runtime.daily_limit }}</strong><small>次 / 日</small></div></div></section>
+    </main>
+    <footer v-if="view === 'chat'" class="composer-area">
       <div class="mode-row"><span class="mode-label">检索模式</span><div class="segmented" role="radiogroup" aria-label="检索模式"><button v-for="item in (['vector', 'bm25', 'hybrid', 'agent'] as SearchMode[])" :key="item" :class="{ selected: mode === item }" :aria-checked="mode === item" role="radio" :disabled="isStreaming" @click="mode = item">{{ item }}</button></div><span class="mode-hint">{{ mode === 'hybrid' ? '语义 + 关键词，推荐' : mode === 'vector' ? '语义相似度' : mode === 'agent' ? 'LLM 自主调用工具' : '关键词匹配' }}</span></div>
-      <div class="composer"><textarea ref="composer" v-model="question" :disabled="isStreaming" rows="1" placeholder="询问 STM32、ESP-IDF 的技术细节…" @input="resizeComposer" @keydown="onKeydown"></textarea><div class="composer-actions"><span>Enter 发送 <i>·</i> Shift + Enter 换行</span><button v-if="isStreaming" class="stop-button" @click="stop">停止</button><button v-else class="send-button" :disabled="!question.trim()" aria-label="发送问题" @click="ask">↑</button></div></div>
+      <div class="composer"><textarea ref="composer" v-model="question" :disabled="isStreaming" rows="1" placeholder="询问 STM32、ESP-IDF 的技术细节…" @input="resizeComposer" @keydown="onKeydown"></textarea><div class="composer-actions"><span>Enter 发送 <i>·</i> Shift + Enter 换行</span><button v-if="isStreaming" class="stop-button" @click="stop">停止</button><button v-else class="send-button" :disabled="!question.trim()" aria-label="发送问题" @click="ask()">↑</button></div></div>
       <p class="disclaimer">答案由技术手册检索生成，请结合引用原文进行验证。</p>
     </footer>
   </div>

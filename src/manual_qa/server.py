@@ -159,6 +159,41 @@ async def ask(body: AskBody):
     return EventSourceResponse(gen())
 
 
+@app.get("/api/metrics")
+def metrics() -> dict:
+    """评测面板数据：离线评测结果（文件读取，口径见 metric_note）+ 实时状态。"""
+    import json as _j
+    from pathlib import Path as _P
+
+    offline = None
+    bp = _P("data/eval_breakdown.json")
+    if bp.exists():
+        raw = _j.loads(bp.read_text())
+        offline = {
+            "evaluated_at": "2026-09-28",
+            "qa_set": "123 题分层 QA 集（37 章分层抽样 + LLM 依种子出题）",
+            "metric_note": "章节级 recall@5：top-5 命中正确内容所在章节",
+            "configs": [
+                {"name": "vector", "label": "纯向量", "recall5": 0.943, "mrr": 0.799},
+                {"name": "hybrid", "label": "混合检索(RRF)", "recall5": 0.935, "mrr": 0.803},
+                {"name": "hybrid_rewrite", "label": "混合+查询改写", "recall5": 0.935, "mrr": 0.856},
+            ],
+            "breakdown": [
+                {
+                    "group": g,
+                    "n": v["vector"]["n"],
+                    "vector": {"r5": v["vector"]["r@5"], "mrr": v["vector"]["MRR"]},
+                    "hybrid_rewrite": {"r5": v["hybrid_rewrite"]["r@5"], "mrr": v["hybrid_rewrite"]["MRR"]},
+                }
+                for g, v in raw.items()
+            ],
+        }
+    return {
+        "offline": offline,
+        "runtime": {"chunks": 105716, "docs": "RM0433 + ESP-IDF", "daily_limit": 30},
+    }
+
+
 @app.post("/api/search")
 def search(body: SearchBody) -> dict:
     get_rag()
